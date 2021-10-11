@@ -1,19 +1,20 @@
 {
     "name": "HolidaysGoogle",
-    "docs": "https://github.com/firstone/holidays-google-poly/blob/master/README.md",
+    "docs": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly/blob/master/README.md",
     "type": "python3",
     "executable": "holidays.py",
     "install": "install.sh",
     "shortPoll": 15,
     "longPoll": 60,
+	"logLevel": "INFO",
     "description": "Holidays for ISY scheduling using Google Calendar",
-    "notice": "https://github.com/firstone/holidays-google-poly/blob/master/LICENSE",
+    "notice": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly/blob/master/LICENSE",
     "credits": [
         {
             "title": "Holidays for Google Calendar",
             "author": "FirstOne",
-            "source": "https://github.com/firstone/holidays-google-poly",
-            "license": "https://github.com/firstone/holidays-google-poly/blob/master/LICENSE",
+            "source": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly",
+            "license": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly/blob/master/LICENSE",
             "version": "0.2.1"
         },
         {
@@ -24,5 +25,14 @@
             "source": "https://github.com/Einstein42/udi-poly-template-python",
             "license": "https://raw.githubusercontent.com/Einstein42/udi-poly-template-python/master/LICENSE"
         }
-    ]
+    ],
+	"store": {
+		"developer": "bpaauwe@bobsplace.com",
+		"purchaseOptions": [
+			{
+				"isPerpetual": true,
+				"price": 0
+			}
+		]
+	}
 }

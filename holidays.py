@@ -8,33 +8,32 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import os
 import pickle
-import polyinterface
-from polyinterface import LOGGER
+import udi_interface
+from udi_interface import LOGGER, Custom
 import pytz
 
 
-class Controller(polyinterface.Controller):
+class Controller(udi_interface.Node):
 
     SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-    def __init__(self, polyglot):
-        super(Controller, self).__init__(polyglot)
+    def __init__(self, polyglot, primary, address, name):
+        super(Controller, self).__init__(polyglot, primary, address, name)
+        self.poly = polyglot
         self.calendars = []
-        self.poly.onConfig(self.process_config)
         self.calendarList = []
         self.service = None
         self.credentials = None
         self.isStarted = False
         self.config = None
 
-    def discover(self, *args, **kwargs):
-        self.refresh()
+        self.TypedParameters = Custom(polyglot, "customtypedparams")
 
-    def query(self):
-        super(Controller, self).query()
+        polyglot.subscribe(polyglot.START, self.start, address)
+        polyglot.subscribe(polyglot.CUSTOMTYPEDDATA, self.parameterHandler)
+        polyglot.subscribe(polyglot.POLL, self.poll)
 
-    def start(self):
-        params = [
+        self.TypedParameters.load( [
             {
                 'name': 'calendarName',
                 'title': 'Calendar Name',
@@ -47,9 +46,20 @@ class Controller(polyinterface.Controller):
                 'title': 'Google Authentication Token',
                 'desc': 'Obtain token by visiting authentication URL'
             }
-        ]
-        self.poly.save_typed_params(params)
+        ], True)
 
+        polyglot.ready()
+        polyglot.addNode(self)
+
+    def discover(self, *args, **kwargs):
+        self.refresh()
+
+    def query(self):
+        super(Controller, self).query()
+
+    def start(self):
+        self.poly.updateProfile()
+        self.poly.setCustomParamsDoc()
         self.setDriver('ST', 1)
         LOGGER.info('Started HolidayGoogle Server')
 
@@ -68,28 +78,32 @@ class Controller(polyinterface.Controller):
 
                 authURL, _ = self.flow.authorization_url(prompt='consent')
 
-                self.addNotice('Authenticate by visiting <a href="' +
-                    authURL + '">Authentication Link</a>', 'auth')
+                self.poly.Notices['auth'] = 'Authenticate by visiting <a href="{}">Authentication Link</a>'.format(authURL)
                 self.isStarted = True
                 return
 
         self.openService()
         self.isStarted = True
 
+        '''
+        FIXME: This forced processing of config (type parameters) data
+        after start, do we need to do this?
         if self.config is not None:
             self.process_config(self.config)
             self.config = None
+        '''
         self.refresh()
 
     def openService(self):
         self.service = build('calendar', 'v3', credentials=self.credentials)
         LOGGER.debug('Google API Connection opened')
 
-    def longPoll(self):
-        try:
-            self.refresh()
-        except Exception as e:
-            LOGGER.error('Error refreshing calendars: %s', e)
+    def poll(self, pollflag):
+        if 'longPoll' in pollflag:
+            try:
+                self.refresh()
+            except Exception as e:
+                LOGGER.error('Error refreshing calendars: %s', e)
 
     def refresh(self):
         if not self.isStarted:
@@ -124,12 +138,19 @@ class Controller(polyinterface.Controller):
             'date' in event['start'] and
             'date' in event['end'])
 
-    def process_config(self, config):
+    def parameterHandler(self, params):
+        '''
+        FIXME: We can't really abort here if not started, if we do
+        we won't get here again unless the user changes the config
+        might need to save the params and move the process of the
+        parameters to a separate method.  Or maybe it all works fine
+        timing wise.
         if not self.isStarted:
             self.config = config
             return
+        '''
 
-        typedConfig = config.get('typedCustomData')
+        typedConfig = params
         if typedConfig is None:
             LOGGER.info('Config is not set')
             return
@@ -140,12 +161,15 @@ class Controller(polyinterface.Controller):
                 return
 
             try:
+                self.flow = Flow.from_client_secrets_file(
+                    'credentials.json', Controller.SCOPES,
+                    redirect_uri='urn:ietf:wg:oauth:2.0:oob')
                 self.flow.fetch_token(code=typedConfig.get('token'))
                 with open('token.pickle', 'wb') as token:
                     pickle.dump(self.flow.credentials, token)
                 self.credentials = self.flow.credentials
                 self.openService()
-                self.removeNotice('auth')
+                self.poly.Notices.clear()
             except Exception as e:
                 LOGGER.error('Error getting credentials: %s', e)
                 return
@@ -174,25 +198,27 @@ class Controller(polyinterface.Controller):
                         calendarName)
                 else:
                     entry = CalendarEntry(calendar,
-                        DayNode(self, self.address,
+                        DayNode(self.poly, self.address,
                             'today' + str(calendarIndex),
                             calendar['summary'] + ' Today'),
-                        DayNode(self, self.address,
+                        DayNode(self.poly, self.address,
                             'tmrow' + str(calendarIndex),
                             calendar['summary'] + ' Tomorrow'))
                     self.calendars.append(entry)
-                    self.addNode(entry.todayNode)
-                    self.addNode(entry.tomorrowNode)
+                    self.poly.addNode(entry.todayNode)
+                    self.poly.addNode(entry.tomorrowNode)
 
                     calendarIndex += 1
 
         if calendarList.keys() != self.calendarList:
+            cfgdata = self.poly.getMarkDownData('POLYGLOT_CONFIG.md')
             self.calendarList = calendarList.keys()
             data = '<h3>Configured Calendars</h3><ul>'
             for calendarName in self.calendarList:
                 data += '<li>' + calendarName + '</li>'
             data += '</ul>'
-            self.poly.add_custom_config_docs(data, True)
+            cfgdata += data
+            self.poly.setCustomParamsDoc(cfgdata)
 
         self.refresh()
 
@@ -208,7 +234,7 @@ class CalendarEntry(object):
         self.tomorrowNode = tomorrowNode
 
 
-class DayNode(polyinterface.Node):
+class DayNode(udi_interface.Node):
     def __init__(self, primary, controllerAddress, address, name):
         super(DayNode, self).__init__(primary, controllerAddress, address, name)
         self.futureState = False
@@ -249,11 +275,10 @@ class DayNode(polyinterface.Node):
 
 @click.command()
 def holidays_server():
-    polyglot = polyinterface.Interface('HolidaysGoogleServer')
+    polyglot = udi_interface.Interface([])
     polyglot.start()
-    controller = Controller(polyglot)
-    controller.name = 'Holidays Google Controller'
-    controller.runForever()
+    Controller(polyglot, "controller", "controller", "Holidays Google Controller")
+    polyglot.runForever()
 
 
 if __name__ == '__main__':
