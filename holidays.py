@@ -49,7 +49,7 @@ class Controller(udi_interface.Node):
         ], True)
 
         polyglot.ready()
-        polyglot.addNode(self)
+        polyglot.addNode(self, conn_status="ST")
 
     def discover(self, *args, **kwargs):
         self.refresh()
@@ -276,7 +276,7 @@ class DayNode(udi_interface.Node):
 @click.command()
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start()
+    polyglot.start("1.0.0")
     Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 
