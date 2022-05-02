@@ -10,3 +10,7 @@ ST-day-ST-NAME = Day Off
 ST-day-GV0-NAME = Month
 ST-day-GV1-NAME = Day
 ST-day-GV2-NAME = Year
+
+STATUS-0 = Disconnected
+STATUS-1 = Connected
+STATUS-2 = Failed

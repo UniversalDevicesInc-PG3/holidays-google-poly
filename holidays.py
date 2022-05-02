@@ -264,7 +264,7 @@ class DayNode(udi_interface.Node):
         self.reportDrivers()
 
     drivers = [
-        { 'driver': 'ST', 'value': 0, 'uom': 2 },
+        { 'driver': 'ST', 'value': 0, 'uom': 25 },
         { 'driver': 'GV0', 'value': 0, 'uom': 47 },
         { 'driver': 'GV1', 'value': 0, 'uom': 9 },
         { 'driver': 'GV2', 'value': 0, 'uom': 77 }
@@ -276,7 +276,7 @@ class DayNode(udi_interface.Node):
 @click.command()
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("1.0.0")
+    polyglot.start("1.0.1")
     Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 

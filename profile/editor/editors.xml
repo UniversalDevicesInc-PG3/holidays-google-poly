@@ -2,6 +2,9 @@
     <editor id="bool">
         <range uom="2" subset="0,1" />
     </editor>
+    <editor id="status">
+        <range uom="25" subset="0,1,2" nls="STATUS" />
+    </editor>
     <editor id="day">
         <range uom="9" subset="1-31" />
     </editor>
