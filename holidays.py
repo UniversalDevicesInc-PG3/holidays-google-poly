@@ -224,7 +224,7 @@ class Controller(udi_interface.Node):
 
     id = 'controller'
     commands = { 'DISCOVER': discover, 'QUERY': query }
-    drivers = [{ 'driver': 'ST', 'value': 0, 'uom': 2 }]
+    drivers = [{ 'driver': 'ST', 'value': 0, 'uom': 25 }]
 
 
 class CalendarEntry(object):
@@ -264,7 +264,7 @@ class DayNode(udi_interface.Node):
         self.reportDrivers()
 
     drivers = [
-        { 'driver': 'ST', 'value': 0, 'uom': 25 },
+        { 'driver': 'ST', 'value': 0, 'uom': 2 },
         { 'driver': 'GV0', 'value': 0, 'uom': 47 },
         { 'driver': 'GV1', 'value': 0, 'uom': 9 },
         { 'driver': 'GV2', 'value': 0, 'uom': 77 }
@@ -276,7 +276,7 @@ class DayNode(udi_interface.Node):
 @click.command()
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("1.0.1")
+    polyglot.start("1.0.2")
     Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 
