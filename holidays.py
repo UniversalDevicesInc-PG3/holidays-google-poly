@@ -160,19 +160,31 @@ class Controller(udi_interface.Node):
                 LOGGER.warn('Token is not set')
                 return
 
-            try:
-                self.flow = Flow.from_client_secrets_file(
-                    'credentials.json', Controller.SCOPES,
-                    redirect_uri='urn:ietf:wg:oauth:2.0:oob')
-                self.flow.fetch_token(code=typedConfig.get('token'))
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(self.flow.credentials, token)
-                self.credentials = self.flow.credentials
+            if os.path.exists('token.pickle'):
+                with open('token.pickle', 'rb') as token:
+                    self.credentials = pickle.load(token)
+
+                if not self.credentials or not self.credentials.valid:
+                    if (self.credentials and self.credentials.expired and
+                        self.credentials.refresh_token):
+                        self.credentials.refresh(Request())
+
                 self.openService()
-                self.poly.Notices.clear()
-            except Exception as e:
-                LOGGER.error('Error getting credentials: %s', e)
-                return
+            else:
+                # No access token exists, get one using code
+                try:
+                    self.flow = Flow.from_client_secrets_file(
+                        'credentials.json', Controller.SCOPES,
+                        redirect_uri='urn:ietf:wg:oauth:2.0:oob')
+                    self.flow.fetch_token(code=typedConfig.get('token'))
+                    with open('token.pickle', 'wb') as token:
+                        pickle.dump(self.flow.credentials, token)
+                    self.credentials = self.flow.credentials
+                    self.openService()
+                    self.poly.Notices.clear()
+                except Exception as e:
+                    LOGGER.error('Error getting credentials: %s', e)
+                    return
 
         LOGGER.debug('Reading calendar configuration')
         self.calendars = []
@@ -182,7 +194,7 @@ class Controller(udi_interface.Node):
         while True:
             list = self.service.calendarList().list(pageToken=pageToken).execute()
             for listEntry in list['items']:
-                # LOGGER.debug('Found calendar %s %s', listEntry['summary'], listEntry)
+                LOGGER.debug('Found calendar %s %s', listEntry['summary'], listEntry)
                 calendarList[listEntry['summary']] = listEntry
                 pageToken = list.get('nextPageToken')
             if not pageToken:
@@ -209,6 +221,8 @@ class Controller(udi_interface.Node):
                     self.poly.addNode(entry.tomorrowNode)
 
                     calendarIndex += 1
+        else:
+            LOGGER.debug('No calendars are defined in the configuration.')
 
         if calendarList.keys() != self.calendarList:
             cfgdata = self.poly.getMarkDownData('POLYGLOT_CONFIG.md')
@@ -276,7 +290,7 @@ class DayNode(udi_interface.Node):
 @click.command()
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("1.0.2")
+    polyglot.start("1.0.3")
     Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 
