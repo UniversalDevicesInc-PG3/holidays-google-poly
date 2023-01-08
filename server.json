@@ -6,7 +6,7 @@
     "install": "install.sh",
     "shortPoll": 15,
     "longPoll": 60,
-	"logLevel": "INFO",
+    "logLevel": "INFO",
     "description": "Holidays for ISY scheduling using Google Calendar",
     "notice": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly/blob/master/LICENSE",
     "credits": [
@@ -15,7 +15,7 @@
             "author": "FirstOne",
             "source": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly",
             "license": "https://github.com/UniversalDevicesInc-PG3/holidays-google-poly/blob/master/LICENSE",
-            "version": "1.0.3"
+            "version": "1.0.4"
         },
         {
             "title": "udi-poly-template-python: A Polyglot v2 Poly template",
@@ -26,13 +26,13 @@
             "license": "https://raw.githubusercontent.com/Einstein42/udi-poly-template-python/master/LICENSE"
         }
     ],
-	"store": {
-		"developer": "bpaauwe@bobsplace.com",
-		"purchaseOptions": [
-			{
-				"isPerpetual": true,
-				"price": 0
-			}
-		]
-	}
+    "store": {
+        "developer": "firstone@erissoft.com",
+        "purchaseOptions": [
+            {
+                "isPerpetual": true,
+                "price": 0
+            }
+        ]
+    }
 }

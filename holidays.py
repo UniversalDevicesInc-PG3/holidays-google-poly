@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 
-import click
 import datetime
 import dateutil.parser
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
-import os
-import pickle
-import udi_interface
-from udi_interface import LOGGER, Custom
+from google.oauth2.credentials import Credentials
+import json
 import pytz
+import udi_interface
+from udi_interface import LOGGER
 
 
 class Controller(udi_interface.Node):
@@ -21,32 +19,28 @@ class Controller(udi_interface.Node):
         super(Controller, self).__init__(polyglot, primary, address, name)
         self.poly = polyglot
         self.calendars = []
-        self.calendarList = []
+        self.calendar_list = []
         self.service = None
         self.credentials = None
-        self.isStarted = False
+        self.is_started = False
         self.config = None
 
-        self.TypedParameters = Custom(polyglot, "customtypedparams")
-
         polyglot.subscribe(polyglot.START, self.start, address)
-        polyglot.subscribe(polyglot.CUSTOMTYPEDDATA, self.parameterHandler)
+        polyglot.subscribe(polyglot.CUSTOMTYPEDDATA, self.parameter_handler)
         polyglot.subscribe(polyglot.POLL, self.poll)
 
-        self.TypedParameters.load( [
-            {
+        udi_interface.Custom(polyglot, "customtypedparams").load(
+            [{
                 'name': 'calendarName',
                 'title': 'Calendar Name',
                 'desc': 'Name of the calendar in Google Calendar',
                 'isRequired': True,
                 'isList': True
-            },
-            {
+            }, {
                 'name': 'token',
                 'title': 'Google Authentication Token',
                 'desc': 'Obtain token by visiting authentication URL'
-            }
-        ], True)
+            }], True)
 
         polyglot.ready()
         polyglot.addNode(self, conn_status="ST")
@@ -59,42 +53,12 @@ class Controller(udi_interface.Node):
 
     def start(self):
         self.poly.updateProfile()
+        self.poly.Notices.clear()
         self.poly.setCustomParamsDoc()
         self.setDriver('ST', 1)
         LOGGER.info('Started HolidayGoogle Server')
 
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
-                self.credentials = pickle.load(token)
-
-        if not self.credentials or not self.credentials.valid:
-            if (self.credentials and self.credentials.expired and
-                self.credentials.refresh_token):
-                self.credentials.refresh(Request())
-            else:
-                self.flow = Flow.from_client_secrets_file(
-                    'credentials.json', Controller.SCOPES,
-                    redirect_uri='urn:ietf:wg:oauth:2.0:oob')
-
-                authURL, _ = self.flow.authorization_url(prompt='consent')
-
-                self.poly.Notices['auth'] = 'Authenticate by visiting <a href="{}">Authentication Link</a>'.format(authURL)
-                self.isStarted = True
-                return
-
-        self.openService()
-        self.isStarted = True
-
-        '''
-        FIXME: This forced processing of config (type parameters) data
-        after start, do we need to do this?
-        if self.config is not None:
-            self.process_config(self.config)
-            self.config = None
-        '''
-        self.refresh()
-
-    def openService(self):
+    def open_service(self):
         self.service = build('calendar', 'v3', credentials=self.credentials)
         LOGGER.debug('Google API Connection opened')
 
@@ -106,168 +70,161 @@ class Controller(udi_interface.Node):
                 LOGGER.error('Error refreshing calendars: %s', e)
 
     def refresh(self):
-        if not self.isStarted:
+        if not self.is_started:
             return
 
         for entry in self.calendars:
             calendar = entry.calendar
-            LOGGER.debug('Checking calendar %s', calendar['summary'])
-            todayDate = datetime.datetime.now(pytz.timezone(calendar['timeZone']))
-            todayDate = todayDate.replace(hour=0, minute=0, second=0, microsecond=0)
-            tomorrowDate = todayDate + datetime.timedelta(days=1)
-            endDate = todayDate + datetime.timedelta(days=2)
-            entry.todayNode.setDate(todayDate)
-            entry.tomorrowNode.setDate(tomorrowDate)
-            result = self.service.events().list(calendarId=calendar['id'],
-                timeMin=todayDate.isoformat(), singleEvents=True,
-                timeMax=endDate.isoformat()).execute()
+            LOGGER.debug(f'Checking calendar {calendar["summary"]}')
+            today_date = datetime.datetime.now(
+                pytz.timezone(calendar['timeZone']))
+            today_date = today_date.replace(hour=0,
+                                            minute=0,
+                                            second=0,
+                                            microsecond=0)
+            tomorrow_date = today_date + datetime.timedelta(days=1)
+            end_date = today_date + datetime.timedelta(days=2)
+            entry.today_node.set_date(today_date)
+            entry.tomorrow_node.set_date(tomorrow_date)
+            result = self.service.events().list(
+                calendarId=calendar['id'],
+                timeMin=today_date.isoformat(),
+                singleEvents=True,
+                timeMax=end_date.isoformat()).execute()
             for event in result.get('items', []):
                 if self.is_holiday(event):
-                    LOGGER.debug('Event found %s', event['summary'])
+                    LOGGER.debug(f'Event found {event["summary"]}')
                     date = dateutil.parser.parse(event['start']['date']).date()
 
-                    if date == todayDate.date():
-                        entry.todayNode.setFutureState()
+                    if date == today_date.date():
+                        entry.today_node.set_future_state()
                     else:
-                        entry.tomorrowNode.setFutureState()
-            entry.todayNode.refresh()
-            entry.tomorrowNode.refresh()
+                        entry.tomorrow_node.set_future_state()
+            entry.today_node.refresh()
+            entry.tomorrow_node.refresh()
 
     def is_holiday(self, event):
-        return (event.get('transparency') == 'transparent' and
-            'date' in event['start'] and
-            'date' in event['end'])
+        return (event.get('transparency') == 'transparent'
+                and 'date' in event['start'] and 'date' in event['end'])
 
-    def parameterHandler(self, params):
-        '''
-        FIXME: We can't really abort here if not started, if we do
-        we won't get here again unless the user changes the config
-        might need to save the params and move the process of the
-        parameters to a separate method.  Or maybe it all works fine
-        timing wise.
-        if not self.isStarted:
-            self.config = config
-            return
-        '''
+    def ask_auth(self):
+        self.poly.Notices[
+            'auth'] = 'Please, follow authentication instructions to set \'token\' parameter'
 
-        typedConfig = params
-        if typedConfig is None:
+    def parameter_handler(self, params):
+        if params is None:
             LOGGER.info('Config is not set')
             return
 
-        if self.service is None:
-            if len(typedConfig.get('token')) == 0:
-                LOGGER.warn('Token is not set')
+        if params.get('token') is None or len(params.get('token')) == 0:
+            LOGGER.warning('Token is not set')
+            self.ask_auth()
+            return
+
+        self.credentials = Credentials.from_authorized_user_info(
+            json.loads(params['token']), scopes=Controller.SCOPES)
+        if not self.credentials or not self.credentials.valid:
+            if (self.credentials and self.credentials.expired
+                    and self.credentials.refresh_token):
+                LOGGER.debug('Refreshing credentials')
+                self.credentials.refresh(Request())
+            else:
+                LOGGER.warning('Credential invalid')
+                self.ask_auth()
                 return
 
-            if os.path.exists('token.pickle'):
-                with open('token.pickle', 'rb') as token:
-                    self.credentials = pickle.load(token)
-
-                if not self.credentials or not self.credentials.valid:
-                    if (self.credentials and self.credentials.expired and
-                        self.credentials.refresh_token):
-                        self.credentials.refresh(Request())
-
-                self.openService()
-            else:
-                # No access token exists, get one using code
-                try:
-                    self.flow = Flow.from_client_secrets_file(
-                        'credentials.json', Controller.SCOPES,
-                        redirect_uri='urn:ietf:wg:oauth:2.0:oob')
-                    self.flow.fetch_token(code=typedConfig.get('token'))
-                    with open('token.pickle', 'wb') as token:
-                        pickle.dump(self.flow.credentials, token)
-                    self.credentials = self.flow.credentials
-                    self.openService()
-                    self.poly.Notices.clear()
-                except Exception as e:
-                    LOGGER.error('Error getting credentials: %s', e)
-                    return
+        self.open_service()
 
         LOGGER.debug('Reading calendar configuration')
         self.calendars = []
 
-        calendarList = {}
-        pageToken = None
+        calendar_list = {}
+        page_token = None
         while True:
-            list = self.service.calendarList().list(pageToken=pageToken).execute()
-            for listEntry in list['items']:
-                LOGGER.debug('Found calendar %s %s', listEntry['summary'], listEntry)
-                calendarList[listEntry['summary']] = listEntry
-                pageToken = list.get('nextPageToken')
-            if not pageToken:
+            list = self.service.calendarList().list(
+                pageToken=page_token).execute()
+            for list_entry in list['items']:
+                LOGGER.debug(
+                    f'Found calendar {list_entry["summary"]} {list_entry}')
+                calendar_list[list_entry['summary']] = list_entry
+                page_token = list.get('nextPageToken')
+            if not page_token:
                 break
 
-        list = typedConfig.get('calendarName')
-        calendarIndex = 0
+        list = params.get('calendarName')
+        calendar_index = 0
         if list is not None:
-            for calendarName in list:
-                calendar = calendarList.get(calendarName)
+            for calendar_name in list:
+                calendar = calendar_list.get(calendar_name)
                 if calendar is None:
-                    LOGGER.error('Cannot find configured calendar name %s',
-                        calendarName)
+                    LOGGER.error(
+                        f'Cannot find configured calendar name {calendar_name}'
+                    )
                 else:
-                    entry = CalendarEntry(calendar,
+                    entry = CalendarEntry(
+                        calendar,
                         DayNode(self.poly, self.address,
-                            'today' + str(calendarIndex),
-                            calendar['summary'] + ' Today'),
+                                'today' + str(calendar_index),
+                                calendar['summary'] + ' Today'),
                         DayNode(self.poly, self.address,
-                            'tmrow' + str(calendarIndex),
-                            calendar['summary'] + ' Tomorrow'))
+                                'tmrow' + str(calendar_index),
+                                calendar['summary'] + ' Tomorrow'))
                     self.calendars.append(entry)
-                    self.poly.addNode(entry.todayNode)
-                    self.poly.addNode(entry.tomorrowNode)
+                    self.poly.addNode(entry.today_node)
+                    self.poly.addNode(entry.tomorrow_node)
 
-                    calendarIndex += 1
+                    calendar_index += 1
         else:
             LOGGER.debug('No calendars are defined in the configuration.')
 
-        if calendarList.keys() != self.calendarList:
-            cfgdata = self.poly.getMarkDownData('POLYGLOT_CONFIG.md')
-            self.calendarList = calendarList.keys()
+        if calendar_list.keys() != self.calendar_list:
+            config_data = self.poly.getMarkDownData('POLYGLOT_CONFIG.md')
+            self.calendar_list = calendar_list.keys()
             data = '<h3>Configured Calendars</h3><ul>'
-            for calendarName in self.calendarList:
-                data += '<li>' + calendarName + '</li>'
+            for calendar_name in self.calendar_list:
+                data += '<li>' + calendar_name + '</li>'
             data += '</ul>'
-            cfgdata += data
-            self.poly.setCustomParamsDoc(cfgdata)
+            config_data += data
+            self.poly.setCustomParamsDoc(config_data)
 
+        self.is_started = True
         self.refresh()
 
     id = 'controller'
-    commands = { 'DISCOVER': discover, 'QUERY': query }
-    drivers = [{ 'driver': 'ST', 'value': 0, 'uom': 25 }]
+    commands = {'DISCOVER': discover, 'QUERY': query}
+    drivers = [{'driver': 'ST', 'value': 0, 'uom': 25}]
 
 
 class CalendarEntry(object):
-    def __init__(self, calendar, todayNode, tomorrowNode):
+
+    def __init__(self, calendar, today_node, tomorrow_node):
         self.calendar = calendar
-        self.todayNode = todayNode
-        self.tomorrowNode = tomorrowNode
+        self.today_node = today_node
+        self.tomorrow_node = tomorrow_node
 
 
 class DayNode(udi_interface.Node):
-    def __init__(self, primary, controllerAddress, address, name):
-        super(DayNode, self).__init__(primary, controllerAddress, address, name)
-        self.futureState = False
-        self.currentDate = None
 
-    def setDate(self, date):
-        if self.currentDate != date:
-            self.currentDate = date
+    def __init__(self, primary, controller_address, address, name):
+        super(DayNode, self).__init__(primary, controller_address, address,
+                                      name)
+        self.future_state = False
+        self.current_date = None
+
+    def set_date(self, date):
+        if self.current_date != date:
+            self.current_date = date
             self.setDriver('GV0', date.month)
             self.setDriver('GV1', date.day)
             self.setDriver('GV2', date.year)
 
-    def setFutureState(self):
-        self.futureState = True
+    def set_future_state(self):
+        self.future_state = True
 
     def refresh(self):
-        if self.futureState:
+        if self.future_state:
             self.setState(True)
-            self.futureState = False
+            self.future_state = False
         else:
             self.setState(False)
 
@@ -277,21 +234,32 @@ class DayNode(udi_interface.Node):
     def query(self):
         self.reportDrivers()
 
-    drivers = [
-        { 'driver': 'ST', 'value': 0, 'uom': 2 },
-        { 'driver': 'GV0', 'value': 0, 'uom': 47 },
-        { 'driver': 'GV1', 'value': 0, 'uom': 9 },
-        { 'driver': 'GV2', 'value': 0, 'uom': 77 }
-    ]
+    drivers = [{
+        'driver': 'ST',
+        'value': 0,
+        'uom': 2
+    }, {
+        'driver': 'GV0',
+        'value': 0,
+        'uom': 47
+    }, {
+        'driver': 'GV1',
+        'value': 0,
+        'uom': 9
+    }, {
+        'driver': 'GV2',
+        'value': 0,
+        'uom': 77
+    }]
 
     id = 'daynode'
 
 
-@click.command()
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("1.0.3")
-    Controller(polyglot, "controller", "controller", "Holidays Google Controller")
+    polyglot.start("1.0.4")
+    Controller(polyglot, "controller", "controller",
+               "Holidays Google Controller")
     polyglot.runForever()
 
 
