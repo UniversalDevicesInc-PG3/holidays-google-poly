@@ -20,27 +20,29 @@ class Controller(udi_interface.Node):
         self.poly = polyglot
         self.calendars = []
         self.calendar_list = []
+        self.config_calendar_list = []
+        self.oauth = {}
         self.service = None
         self.credentials = None
         self.is_started = False
-        self.config = None
+
+        self.custom_data = udi_interface.Custom(polyglot, 'customdata')
 
         polyglot.subscribe(polyglot.START, self.start, address)
         polyglot.subscribe(polyglot.CUSTOMTYPEDDATA, self.parameter_handler)
+        polyglot.subscribe(polyglot.CUSTOMDATA, self.custom_data_handler)
+        polyglot.subscribe(polyglot.CUSTOMNS, self.custom_ns_handler)
+        polyglot.subscribe(polyglot.OAUTH, self.oauth_handler)
         polyglot.subscribe(polyglot.POLL, self.poll)
+        polyglot.subscribe(polyglot.CONFIGDONE, self.config_done_handler)
 
-        udi_interface.Custom(polyglot, "customtypedparams").load(
-            [{
-                'name': 'calendarName',
-                'title': 'Calendar Name',
-                'desc': 'Name of the calendar in Google Calendar',
-                'isRequired': True,
-                'isList': True
-            }, {
-                'name': 'token',
-                'title': 'Google Authentication Token',
-                'desc': 'Obtain token by visiting authentication URL'
-            }], True)
+        udi_interface.Custom(polyglot, "customtypedparams").load([{
+            'name': 'calendarName',
+            'title': 'Calendar Name',
+            'desc': 'Name of the calendar in Google Calendar',
+            'isRequired': True,
+            'isList': True
+        }], True)
 
         polyglot.ready()
         polyglot.addNode(self, conn_status="ST")
@@ -53,7 +55,6 @@ class Controller(udi_interface.Node):
 
     def start(self):
         self.poly.updateProfile()
-        self.poly.Notices.clear()
         self.poly.setCustomParamsDoc()
         self.setDriver('ST', 1)
         LOGGER.info('Started HolidayGoogle Server')
@@ -76,21 +77,16 @@ class Controller(udi_interface.Node):
         for entry in self.calendars:
             calendar = entry.calendar
             LOGGER.debug(f'Checking calendar {calendar["summary"]}')
-            today_date = datetime.datetime.now(
-                pytz.timezone(calendar['timeZone']))
-            today_date = today_date.replace(hour=0,
-                                            minute=0,
-                                            second=0,
-                                            microsecond=0)
+            today_date = datetime.datetime.now(pytz.timezone(calendar['timeZone']))
+            today_date = today_date.replace(hour=0, minute=0, second=0, microsecond=0)
             tomorrow_date = today_date + datetime.timedelta(days=1)
             end_date = today_date + datetime.timedelta(days=2)
             entry.today_node.set_date(today_date)
             entry.tomorrow_node.set_date(tomorrow_date)
-            result = self.service.events().list(
-                calendarId=calendar['id'],
-                timeMin=today_date.isoformat(),
-                singleEvents=True,
-                timeMax=end_date.isoformat()).execute()
+            result = self.service.events().list(calendarId=calendar['id'],
+                                                timeMin=today_date.isoformat(),
+                                                singleEvents=True,
+                                                timeMax=end_date.isoformat()).execute()
             for event in result.get('items', []):
                 if self.is_holiday(event):
                     LOGGER.debug(f'Event found {event["summary"]}')
@@ -104,28 +100,45 @@ class Controller(udi_interface.Node):
             entry.tomorrow_node.refresh()
 
     def is_holiday(self, event):
-        return (event.get('transparency') == 'transparent'
-                and 'date' in event['start'] and 'date' in event['end'])
+        return (event.get('transparency') == 'transparent' and 'date' in event['start'] and 'date' in event['end'])
 
     def ask_auth(self):
-        self.poly.Notices[
-            'auth'] = 'Please, follow authentication instructions to set \'token\' parameter'
+        self.poly.Notices['auth'] = 'Not authenticated or invalid authentication'
+
+    def oauth_handler(self, token_data):
+        self.custom_data['token'] = token_data
+        self.config_done_handler()
+
+    def custom_data_handler(self, data):
+        self.custom_data.load(data)
+
+    def custom_ns_handler(self, key, data):
+        if key == 'oauth':
+            self.oauth = data
 
     def parameter_handler(self, params):
-        if params is None:
-            LOGGER.info('Config is not set')
-            return
+        if params is not None:
+            self.config_calendar_list = params.get('calendarName')
 
-        if params.get('token') is None or len(params.get('token')) == 0:
-            LOGGER.warning('Token is not set')
+    def config_done_handler(self):
+        self.poly.Notices.clear()
+
+        token = self.custom_data['token']
+
+        if token is None:
+            LOGGER.debug('Token is not set')
             self.ask_auth()
             return
 
-        self.credentials = Credentials.from_authorized_user_info(
-            json.loads(params['token']), scopes=Controller.SCOPES)
+        token['client_id'] = self.oauth['client_id']
+        token['client_secret'] = self.oauth['client_secret']
+
+        if len(self.config_calendar_list) == 0:
+            LOGGER.debug('No calendars are defined in the configuration.')
+
+        self.credentials = Credentials.from_authorized_user_info(token, scopes=Controller.SCOPES)
         if not self.credentials or not self.credentials.valid:
-            if (self.credentials and self.credentials.expired
-                    and self.credentials.refresh_token):
+            if (self.credentials and self.credentials.expired and self.credentials.refresh_token):
                 LOGGER.debug('Refreshing credentials')
                 self.credentials.refresh(Request())
             else:
@@ -141,41 +154,29 @@ class Controller(udi_interface.Node):
         calendar_list = {}
         page_token = None
         while True:
-            list = self.service.calendarList().list(
-                pageToken=page_token).execute()
+            list = self.service.calendarList().list(pageToken=page_token).execute()
             for list_entry in list['items']:
-                LOGGER.debug(
-                    f'Found calendar {list_entry["summary"]} {list_entry}')
+                LOGGER.debug(f'Found calendar {list_entry["summary"]} {list_entry}')
                 calendar_list[list_entry['summary']] = list_entry
                 page_token = list.get('nextPageToken')
             if not page_token:
                 break
 
-        list = params.get('calendarName')
         calendar_index = 0
-        if list is not None:
-            for calendar_name in list:
-                calendar = calendar_list.get(calendar_name)
-                if calendar is None:
-                    LOGGER.error(
-                        f'Cannot find configured calendar name {calendar_name}'
-                    )
-                else:
-                    entry = CalendarEntry(
-                        calendar,
-                        DayNode(self.poly, self.address,
-                                'today' + str(calendar_index),
-                                calendar['summary'] + ' Today'),
-                        DayNode(self.poly, self.address,
-                                'tmrow' + str(calendar_index),
-                                calendar['summary'] + ' Tomorrow'))
-                    self.calendars.append(entry)
-                    self.poly.addNode(entry.today_node)
-                    self.poly.addNode(entry.tomorrow_node)
+        for calendar_name in self.config_calendar_list:
+            calendar = calendar_list.get(calendar_name)
+            if calendar is None:
+                LOGGER.error(f'Cannot find configured calendar name {calendar_name}')
+            else:
+                entry = CalendarEntry(
+                    calendar,
+                    DayNode(self.poly, self.address, 'today' + str(calendar_index), calendar['summary'] + ' Today'),
+                    DayNode(self.poly, self.address, 'tmrow' + str(calendar_index), calendar['summary'] + ' Tomorrow'))
+                self.calendars.append(entry)
+                self.poly.addNode(entry.today_node)
+                self.poly.addNode(entry.tomorrow_node)
 
-                    calendar_index += 1
-        else:
-            LOGGER.debug('No calendars are defined in the configuration.')
+                calendar_index += 1
 
         if calendar_list.keys() != self.calendar_list:
             config_data = self.poly.getMarkDownData('POLYGLOT_CONFIG.md')
@@ -206,8 +207,7 @@ class CalendarEntry(object):
 class DayNode(udi_interface.Node):
 
     def __init__(self, primary, controller_address, address, name):
-        super(DayNode, self).__init__(primary, controller_address, address,
-                                      name)
+        super(DayNode, self).__init__(primary, controller_address, address, name)
         self.future_state = False
         self.current_date = None
 
@@ -257,9 +257,8 @@ class DayNode(udi_interface.Node):
 
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("1.0.4")
-    Controller(polyglot, "controller", "controller",
-               "Holidays Google Controller")
+    polyglot.start("2.0.0")
+    Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 
 

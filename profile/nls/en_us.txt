@@ -2,7 +2,7 @@
 ND-controller-NAME = Holidays Google Controller
 CMD-ctl-DISCOVER-NAME = Re-Discover
 CMD-ctl-QUERY-NAME = Query
-ST-ctl-ST-NAME = Holidays NodeServer Online
+ST-ctl-ST-NAME = Holidays NodeServer Status
 
 # daynode
 ND-daynode-NAME = Day Node
