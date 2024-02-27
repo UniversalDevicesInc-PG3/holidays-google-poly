@@ -15,8 +15,9 @@ class Controller(udi_interface.Node):
 
     SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
+    #pylint: disable=unused-argument, too-many-branches
     def __init__(self, polyglot, primary, address, name):
-        super(Controller, self).__init__(polyglot, primary, address, name)
+        super().__init__(polyglot, primary, address, name)
         self.poly = polyglot
         self.calendars = []
         self.calendar_list = []
@@ -36,22 +37,31 @@ class Controller(udi_interface.Node):
         polyglot.subscribe(polyglot.POLL, self.poll)
         polyglot.subscribe(polyglot.CONFIGDONE, self.config_done_handler)
 
-        udi_interface.Custom(polyglot, "customtypedparams").load([{
-            'name': 'calendarName',
-            'title': 'Calendar Name',
-            'desc': 'Name of the calendar in Google Calendar',
-            'isRequired': True,
-            'isList': True
-        }], True)
+        udi_interface.Custom(polyglot, "customtypedparams").load([
+            {
+                'name': 'calendarName',
+                'title': 'Calendar Name',
+                'desc': 'Name of the calendar in Google Calendar',
+                'isRequired': True,
+                'isList': True
+            },
+            {
+                'name': 'clientID',
+                'title': 'Client ID',
+                'desc': 'Optional client ID when using your own authentications',
+            },
+            {
+                'name': 'clientSecret',
+                'title': 'Client Secret',
+                'desc': 'Optional client secret when using your own authentications',
+            },
+        ], True)
 
         polyglot.ready()
         polyglot.addNode(self, conn_status="ST")
 
     def discover(self, *args, **kwargs):
         self.refresh()
-
-    def query(self):
-        super(Controller, self).query()
 
     def start(self):
         self.poly.updateProfile()
@@ -120,6 +130,12 @@ class Controller(udi_interface.Node):
         if params is not None:
             self.config_calendar_list = params.get('calendarName')
 
+            client_id = params.get('clientID')
+            client_secret = params.get('clientSecret')
+            if client_id is not None and client_secret is not None:
+                LOGGER.debug('Overwriting oauth information')
+                self.updateOauthSettings({'client_id': client_id, 'client_secret': client_secret})
+
     def config_done_handler(self):
         self.poly.Notices.clear()
 
@@ -154,11 +170,11 @@ class Controller(udi_interface.Node):
         calendar_list = {}
         page_token = None
         while True:
-            list = self.service.calendarList().list(pageToken=page_token).execute()
-            for list_entry in list['items']:
+            calendar_list = self.service.calendarList().list(pageToken=page_token).execute()
+            for list_entry in calendar_list['items']:
                 LOGGER.debug(f'Found calendar {list_entry["summary"]} {list_entry}')
                 calendar_list[list_entry['summary']] = list_entry
-                page_token = list.get('nextPageToken')
+                page_token = calendar_list.get('nextPageToken')
             if not page_token:
                 break
 
@@ -196,7 +212,7 @@ class Controller(udi_interface.Node):
     drivers = [{'driver': 'ST', 'value': 0, 'uom': 25}]
 
 
-class CalendarEntry(object):
+class CalendarEntry:
 
     def __init__(self, calendar, today_node, tomorrow_node):
         self.calendar = calendar
@@ -207,7 +223,7 @@ class CalendarEntry(object):
 class DayNode(udi_interface.Node):
 
     def __init__(self, primary, controller_address, address, name):
-        super(DayNode, self).__init__(primary, controller_address, address, name)
+        super().__init__(primary, controller_address, address, name)
         self.future_state = False
         self.current_date = None
 
@@ -223,12 +239,12 @@ class DayNode(udi_interface.Node):
 
     def refresh(self):
         if self.future_state:
-            self.setState(True)
+            self.set_state(True)
             self.future_state = False
         else:
-            self.setState(False)
+            self.set_state(False)
 
-    def setState(self, state):
+    def set_state(self, state):
         self.setDriver('ST', 1 if state else 0)
 
     def query(self):
@@ -257,7 +273,7 @@ class DayNode(udi_interface.Node):
 
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("2.0.0")
+    polyglot.start("2.0.1")
     Controller(polyglot, "controller", "controller", "Holidays Google Controller")
     polyglot.runForever()
 
