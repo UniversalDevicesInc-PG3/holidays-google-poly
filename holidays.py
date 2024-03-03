@@ -200,10 +200,10 @@ class Controller(udi_interface.Node):
             end_date = today_date + datetime.timedelta(days=2)
             entry.today_node.set_date(today_date)
             entry.tomorrow_node.set_date(tomorrow_date)
-            result = self.service.events().list(calendarId=calendar['id'],
-                                                timeMin=today_date.isoformat(),
-                                                singleEvents=True,
-                                                timeMax=end_date.isoformat()).execute()
+            result = self.service.service.events().list(calendarId=calendar['id'],
+                                                        timeMin=today_date.isoformat(),
+                                                        singleEvents=True,
+                                                        timeMax=end_date.isoformat()).execute()
             for event in result.get('items', []):
                 if self.is_holiday(event):
                     LOGGER.debug(f'Event found {event["summary"]}')
@@ -302,7 +302,7 @@ class DayNode(udi_interface.Node):
 
 def holidays_server():
     polyglot = udi_interface.Interface([])
-    polyglot.start("3.0.0")
+    polyglot.start("3.0.1")
     service = CalendarService(polyglot)
     Controller(polyglot, "controller", "controller", "Holidays Google Controller", service)
     polyglot.runForever()
